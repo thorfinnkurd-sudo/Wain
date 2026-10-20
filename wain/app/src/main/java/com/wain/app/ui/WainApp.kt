@@ -236,7 +236,12 @@ private fun StatusBanners(ui: UiState, vm: WainViewModel) {
     }
     if (!ui.online) Banner(stringResource(R.string.offline_banner))
     if (AppConfig.isDemoStyle) Banner(stringResource(R.string.devmap_banner))
-    ui.mapError?.let { Banner(stringResource(R.string.map_error)) }
+    ui.mapError?.let { error ->
+    Banner(
+        text = stringResource(R.string.map_error) +
+            if (error.isNotBlank()) " · $error" else ""
+    )
+}
     val fix = ui.fix
     if (ui.locationGranted) {
         when {
