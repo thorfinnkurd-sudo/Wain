@@ -1,17 +1,50 @@
+
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
+    <!-- Clean white road forming a distinctive W -->
     <path
-        android:fillColor="#F2B01E"
-        android:pathData="M54,22C42.5,22 33,31 33,42.5C33,57.5 54,84 54,84C54,84 75,57.5 75,42.5C75,31 65.5,22 54,22Z" />
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M21,32
+            C21,29 23,27 26,27
+            C28,27 30,29 31,32
+            L41,58
+            L49,40
+            C50,37 52,36 54,36
+            C56,36 58,37 59,40
+            L67,58
+            L77,32
+            C78,29 80,27 83,27
+            C86,27 88,29 87,32
+            L73,70
+            C72,73 70,75 67,75
+            C64,75 62,73 61,70
+            L54,54
+            L47,70
+            C46,73 44,75 41,75
+            C38,75 36,73 35,70
+            Z" />
+
+    <!-- Bright lime navigation marker -->
     <path
-        android:fillColor="#00000000"
-        android:strokeColor="#17408B"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:pathData="M42,36L47.5,52L54,40L60.5,52L66,36" />
+        android:fillColor="#D7FF35"
+        android:pathData="M54,16
+            C46,16 40,22 40,30
+            C40,38 54,48 54,48
+            C54,48 68,38 68,30
+            C68,22 62,16 54,16 Z" />
+
+    <!-- Blue center creates a crisp marker detail -->
+    <path
+        android:fillColor="#1769FF"
+        android:pathData="M54,23
+            C50,23 47,26 47,30
+            C47,34 50,37 54,37
+            C58,37 61,34 61,30
+            C61,26 58,23 54,23 Z" />
+
 </vector>
