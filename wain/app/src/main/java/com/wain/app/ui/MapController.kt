@@ -1,3 +1,4 @@
+
 package com.wain.app.ui
 
 import android.graphics.Bitmap
@@ -42,15 +43,19 @@ sealed interface CameraRequest {
     data class Fit(val points: List<LatLon>) : CameraRequest
 }
 
-/** Imperative wrapper around MapLibre. All map state lives here; Compose only pushes data in. */
-class MapController(private val mapView: MapView, private val callbacks: Callbacks) {
-
+/**
+ * MapLibre controller.
+ * Handles base-map style loading, map overlays, camera and user location.
+ */
+class MapController(
+    private val mapView: MapView,
+    private val callbacks: Callbacks,
+) {
     interface Callbacks {
         fun onCameraIdle(bounds: BoundingBox, zoom: Double, center: LatLon)
         fun onUserGesture()
         fun onMapTap(p: LatLon)
-        fun onMapLongPress(p: LatLon)
-        /** Return true when the tap was consumed by a feature. */
+        fun onMapLongPress(p: LatLon): Boolean
         fun onFeatureTap(kind: String, id: String): Boolean
         fun onStyleLoaded(hasBuildings: Boolean)
         fun onMapError(message: String)
@@ -60,6 +65,7 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
     private var style: Style? = null
     private var requestedStyle: String? = null
     private var appliedStyle: String? = null
+    private var styleLoadGeneration = 0
 
     private var pois: List<Poi> = emptyList()
     private var poiLang = "ar"
@@ -75,6 +81,7 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
     init {
         mapView.getMapAsync { m ->
             map = m
+
             m.uiSettings.apply {
                 isCompassEnabled = true
                 isRotateGesturesEnabled = true
@@ -82,85 +89,192 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
                 isAttributionEnabled = true
                 isLogoEnabled = true
             }
-            // Country-level overview of Iraq; replaced by the user's real position once a fix arrives.
-            m.cameraPosition = CameraPosition.Builder().target(LatLng(33.2, 43.7)).zoom(5.2).build()
+
+            m.cameraPosition = CameraPosition.Builder()
+                .target(LatLng(33.2, 43.7))
+                .zoom(5.2)
+                .build()
+
             m.addOnCameraIdleListener {
-                val b = m.projection.visibleRegion.latLngBounds
-                val t = m.cameraPosition.target ?: return@addOnCameraIdleListener
+                val bounds = m.projection.visibleRegion.latLngBounds
+                val target = m.cameraPosition.target
+                    ?: return@addOnCameraIdleListener
+
                 callbacks.onCameraIdle(
-                    BoundingBox(b.latitudeSouth, b.longitudeWest, b.latitudeNorth, b.longitudeEast),
+                    BoundingBox(
+                        bounds.latitudeSouth,
+                        bounds.longitudeWest,
+                        bounds.latitudeNorth,
+                        bounds.longitudeEast,
+                    ),
                     m.cameraPosition.zoom,
-                    LatLon(t.latitude, t.longitude),
+                    LatLon(target.latitude, target.longitude),
                 )
             }
+
             m.addOnCameraMoveStartedListener { reason ->
-                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) callbacks.onUserGesture()
+                if (
+                    reason ==
+                    MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE
+                ) {
+                    callbacks.onUserGesture()
+                }
             }
-            m.addOnMapClickListener { latLng -> handleTap(m, latLng) }
+
+            m.addOnMapClickListener { latLng ->
+                handleTap(m, latLng)
+            }
+
             m.addOnMapLongClickListener { latLng ->
-                callbacks.onMapLongPress(LatLon(latLng.latitude, latLng.longitude))
-                true
+                callbacks.onMapLongPress(
+                    LatLon(latLng.latitude, latLng.longitude)
+                )
             }
-            requestedStyle?.let { applyStyle(it) }
+
+            requestedStyle?.let { applyStyle(it, force = true) }
         }
-        mapView.addOnDidFailLoadingMapListener { message -> callbacks.onMapError(message) }
+
+        mapView.addOnDidFailLoadingMapListener { message ->
+            callbacks.onMapError(
+                "Map loading failed: $message"
+            )
+        }
     }
 
-    // ---- style ------------------------------------------------------------------------------------
+    // ---- Style loading ---------------------------------------------------------------------------
 
     fun setStyle(url: String) {
         requestedStyle = url
-        if (map != null) applyStyle(url)
+
+        if (map != null && (url != appliedStyle || style == null)) {
+            applyStyle(url, force = true)
+        }
     }
 
-    private fun applyStyle(url: String) {
-        if (url == appliedStyle) return
+    /**
+     * Can be called to retry a failed style load, even when the URL
+     * is unchanged.
+     */
+    fun reloadStyle() {
+        val url = requestedStyle ?: appliedStyle
+        if (url != null && map != null) {
+            applyStyle(url, force = true)
+        }
+    }
+
+    private fun applyStyle(url: String, force: Boolean = false) {
+        val m = map ?: return
+
+        if (!force && url == appliedStyle && style != null) return
+
+        requestedStyle = url
         appliedStyle = url
         style = null
-        map?.setStyle(Style.Builder().fromUri(url)) { s ->
-            style = s
-            installLayers(s)
-            callbacks.onStyleLoaded(findBuildingLayer(s) != null)
-            pushAll()
-            apply3d()
+
+        val generation = ++styleLoadGeneration
+
+        try {
+            m.setStyle(Style.Builder().fromUri(url)) { loadedStyle ->
+                // Ignore callbacks from an older style request.
+                if (generation != styleLoadGeneration) return@setStyle
+
+                style = loadedStyle
+
+                try {
+                    installLayers(loadedStyle)
+                    callbacks.onStyleLoaded(
+                        findBuildingLayer(loadedStyle) != null
+                    )
+                    pushAll()
+                    apply3d()
+                } catch (e: Exception) {
+                    style = null
+                    callbacks.onMapError(
+                        "Map style loaded, but layer setup failed: " +
+                            (e.message ?: e.javaClass.simpleName)
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            style = null
+            callbacks.onMapError(
+                "Could not start map style loading: " +
+                    (e.message ?: e.javaClass.simpleName)
+            )
         }
     }
 
     private fun installLayers(s: Style) {
         s.addImage(IMG_ARROW, arrowBitmap())
-        val empty = FeatureCollection.fromFeatures(ArrayList<Feature>())
-        for (id in listOf(SRC_ROUTE_ALT, SRC_ROUTE, SRC_SAFETY, SRC_REPORTS, SRC_POI, SRC_SELECTED, SRC_ACCURACY, SRC_POSITION)) {
-            s.addSource(GeoJsonSource(id, empty))
+
+        val empty = FeatureCollection.fromFeatures(
+            ArrayList<Feature>()
+        )
+
+        listOf(
+            SRC_ROUTE_ALT,
+            SRC_ROUTE,
+            SRC_SAFETY,
+            SRC_REPORTS,
+            SRC_POI,
+            SRC_SELECTED,
+            SRC_ACCURACY,
+            SRC_POSITION,
+        ).forEach { id ->
+            if (s.getSource(id) == null) {
+                s.addSource(GeoJsonSource(id, empty))
+            }
         }
+
         s.addLayer(
             LineLayer(LYR_ROUTE_ALT, SRC_ROUTE_ALT).withProperties(
-                PropertyFactory.lineColor("#8A97AD"), PropertyFactory.lineWidth(6f), PropertyFactory.lineOpacity(0.85f),
-                PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                PropertyFactory.lineColor("#8A97AD"),
+                PropertyFactory.lineWidth(6f),
+                PropertyFactory.lineOpacity(0.85f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
         )
+
         s.addLayer(
             LineLayer(LYR_ROUTE_CASING, SRC_ROUTE).withProperties(
-                PropertyFactory.lineColor("#0B2A66"), PropertyFactory.lineWidth(11f),
-                PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                PropertyFactory.lineColor("#0B2A66"),
+                PropertyFactory.lineWidth(11f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
         )
+
         s.addLayer(
             LineLayer(LYR_ROUTE, SRC_ROUTE).withProperties(
-                PropertyFactory.lineColor("#3D8BFF"), PropertyFactory.lineWidth(7f),
-                PropertyFactory.lineCap(Property.LINE_CAP_ROUND), PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
+                PropertyFactory.lineColor("#3D8BFF"),
+                PropertyFactory.lineWidth(7f),
+                PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
         )
+
         s.addLayer(circleLayer(LYR_SAFETY, SRC_SAFETY, 7f))
         s.addLayer(circleLayer(LYR_REPORTS, SRC_REPORTS, 9f))
+
         s.addLayer(
             CircleLayer(LYR_POI, SRC_POI).withProperties(
                 PropertyFactory.circleRadius(
-                    Expression.interpolate(Expression.linear(), Expression.zoom(), Expression.stop(11, 3f), Expression.stop(18, 8f))
+                    Expression.interpolate(
+                        Expression.linear(),
+                        Expression.zoom(),
+                        Expression.stop(11, 3f),
+                        Expression.stop(18, 8f),
+                    )
                 ),
-                PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
-                PropertyFactory.circleStrokeWidth(1.5f), PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleColor(
+                    Expression.toColor(Expression.get("color"))
+                ),
+                PropertyFactory.circleStrokeWidth(1.5f),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
             )
         )
+
         val labels = SymbolLayer(LYR_POI_LABEL, SRC_POI).withProperties(
             PropertyFactory.textField(Expression.get("label")),
             PropertyFactory.textSize(12f),
@@ -173,64 +287,132 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
         )
         labels.setMinZoom(15f)
         s.addLayer(labels)
+
         s.addLayer(
             CircleLayer(LYR_SELECTED, SRC_SELECTED).withProperties(
-                PropertyFactory.circleRadius(10f), PropertyFactory.circleColor("#F2B01E"),
-                PropertyFactory.circleStrokeWidth(3f), PropertyFactory.circleStrokeColor("#17408B"),
+                PropertyFactory.circleRadius(10f),
+                PropertyFactory.circleColor("#F2B01E"),
+                PropertyFactory.circleStrokeWidth(3f),
+                PropertyFactory.circleStrokeColor("#17408B"),
             )
         )
+
         s.addLayer(
             CircleLayer(LYR_ACCURACY, SRC_ACCURACY).withProperties(
-                PropertyFactory.circleColor("#3D8BFF"), PropertyFactory.circleOpacity(0.15f),
-                PropertyFactory.circleStrokeColor("#3D8BFF"), PropertyFactory.circleStrokeWidth(1f),
-                PropertyFactory.circlePitchAlignment(Property.CIRCLE_PITCH_ALIGNMENT_MAP),
+                PropertyFactory.circleColor("#3D8BFF"),
+                PropertyFactory.circleOpacity(0.15f),
+                PropertyFactory.circleStrokeColor("#3D8BFF"),
+                PropertyFactory.circleStrokeWidth(1f),
+                PropertyFactory.circlePitchAlignment(
+                    Property.CIRCLE_PITCH_ALIGNMENT_MAP
+                ),
                 PropertyFactory.circleRadius(
                     Expression.interpolate(
-                        Expression.exponential(2f), Expression.zoom(),
-                        Expression.stop(0, Expression.get("r0")), Expression.stop(22, Expression.get("r22")),
+                        Expression.exponential(2f),
+                        Expression.zoom(),
+                        Expression.stop(0, Expression.get("r0")),
+                        Expression.stop(22, Expression.get("r22")),
                     )
                 ),
             )
         )
+
         val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
-            PropertyFactory.circleRadius(8f), PropertyFactory.circleColor("#17408B"),
-            PropertyFactory.circleStrokeWidth(3f), PropertyFactory.circleStrokeColor("#FFFFFF"),
+            PropertyFactory.circleRadius(8f),
+            PropertyFactory.circleColor("#17408B"),
+            PropertyFactory.circleStrokeWidth(3f),
+            PropertyFactory.circleStrokeColor("#FFFFFF"),
         )
-        dot.setFilter(Expression.eq(Expression.get("hb"), Expression.literal(0)))
+        dot.setFilter(
+            Expression.eq(
+                Expression.get("hb"),
+                Expression.literal(0),
+            )
+        )
         s.addLayer(dot)
+
         val arrow = SymbolLayer(LYR_POS_ARROW, SRC_POSITION).withProperties(
-            PropertyFactory.iconImage(IMG_ARROW), PropertyFactory.iconSize(0.7f),
+            PropertyFactory.iconImage(IMG_ARROW),
+            PropertyFactory.iconSize(0.7f),
             PropertyFactory.iconRotate(Expression.get("bearing")),
-            PropertyFactory.iconRotationAlignment(Property.ICON_ROTATION_ALIGNMENT_MAP),
-            PropertyFactory.iconAllowOverlap(true), PropertyFactory.iconIgnorePlacement(true),
+            PropertyFactory.iconRotationAlignment(
+                Property.ICON_ROTATION_ALIGNMENT_MAP
+            ),
+            PropertyFactory.iconAllowOverlap(true),
+            PropertyFactory.iconIgnorePlacement(true),
         )
-        arrow.setFilter(Expression.eq(Expression.get("hb"), Expression.literal(1)))
+        arrow.setFilter(
+            Expression.eq(
+                Expression.get("hb"),
+                Expression.literal(1),
+            )
+        )
         s.addLayer(arrow)
     }
 
-    private fun circleLayer(id: String, source: String, radius: Float) = CircleLayer(id, source).withProperties(
+    private fun circleLayer(
+        id: String,
+        source: String,
+        radius: Float,
+    ) = CircleLayer(id, source).withProperties(
         PropertyFactory.circleRadius(radius),
-        PropertyFactory.circleColor(Expression.toColor(Expression.get("color"))),
-        PropertyFactory.circleStrokeWidth(2f), PropertyFactory.circleStrokeColor("#FFFFFF"),
+        PropertyFactory.circleColor(
+            Expression.toColor(Expression.get("color"))
+        ),
+        PropertyFactory.circleStrokeWidth(2f),
+        PropertyFactory.circleStrokeColor("#FFFFFF"),
     )
 
     private fun findBuildingLayer(s: Style): FillLayer? =
-        s.layers.filterIsInstance<FillLayer>().firstOrNull { it.sourceLayer == "building" }
+        s.layers.filterIsInstance<FillLayer>()
+            .firstOrNull { it.sourceLayer == "building" }
 
-    // ---- data -------------------------------------------------------------------------------------
+    // ---- Data -------------------------------------------------------------------------------------
 
-    fun setPois(list: List<Poi>, lang: String) { pois = list; poiLang = lang; pushPois() }
-    fun setSafety(list: List<SafetyFeature>) { safety = list; pushSafety() }
-    fun setReports(list: List<Report>) { reports = list; pushReports() }
-    fun setRoutes(list: List<Route>, selected: Int) { routes = list; selectedRoute = selected; pushRoutes() }
-    fun setSelected(p: LatLon?) { selectedPoint = p; pushSelected() }
-    fun setPosition(f: LocationFix?, bearing: Float?) { fix = f; heading = bearing; pushPosition() }
-
-    private fun pushAll() {
-        pushPois(); pushSafety(); pushReports(); pushRoutes(); pushSelected(); pushPosition()
+    fun setPois(list: List<Poi>, lang: String) {
+        pois = list
+        poiLang = lang
+        pushPois()
     }
 
-    private fun source(id: String): GeoJsonSource? = style?.getSourceAs<GeoJsonSource>(id)
+    fun setSafety(list: List<SafetyFeature>) {
+        safety = list
+        pushSafety()
+    }
+
+    fun setReports(list: List<Report>) {
+        reports = list
+        pushReports()
+    }
+
+    fun setRoutes(list: List<Route>, selected: Int) {
+        routes = list
+        selectedRoute = selected
+        pushRoutes()
+    }
+
+    fun setSelected(p: LatLon?) {
+        selectedPoint = p
+        pushSelected()
+    }
+
+    fun setPosition(f: LocationFix?, bearing: Float?) {
+        fix = f
+        heading = bearing
+        pushPosition()
+    }
+
+    private fun pushAll() {
+        pushPois()
+        pushSafety()
+        pushReports()
+        pushRoutes()
+        pushSelected()
+        pushPosition()
+    }
+
+    private fun source(id: String): GeoJsonSource? =
+        style?.getSourceAs<GeoJsonSource>(id)
 
     private fun point(p: LatLon) = Point.fromLngLat(p.lon, p.lat)
 
@@ -239,20 +421,34 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
             Feature.fromGeometry(point(p.position)).apply {
                 addStringProperty("id", p.id)
                 addStringProperty("color", p.category.colorHex)
-                addStringProperty("label", p.displayName(poiLang) ?: "")
+                addStringProperty(
+                    "label",
+                    p.displayName(poiLang) ?: "",
+                )
             }
         }
-        source(SRC_POI)?.setGeoJson(FeatureCollection.fromFeatures(features))
+        source(SRC_POI)?.setGeoJson(
+            FeatureCollection.fromFeatures(features)
+        )
     }
 
     private fun pushSafety() {
         val features = safety.map { f ->
             Feature.fromGeometry(point(f.position)).apply {
                 addStringProperty("id", f.id)
-                addStringProperty("color", if (f.kind == SafetyKind.SPEED_CAMERA) "#455A64" else "#FB8C00")
+                addStringProperty(
+                    "color",
+                    if (f.kind == SafetyKind.SPEED_CAMERA) {
+                        "#455A64"
+                    } else {
+                        "#FB8C00"
+                    },
+                )
             }
         }
-        source(SRC_SAFETY)?.setGeoJson(FeatureCollection.fromFeatures(features))
+        source(SRC_SAFETY)?.setGeoJson(
+            FeatureCollection.fromFeatures(features)
+        )
     }
 
     private fun pushReports() {
@@ -262,143 +458,311 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
                 addStringProperty("color", r.type.colorHex)
             }
         }
-        source(SRC_REPORTS)?.setGeoJson(FeatureCollection.fromFeatures(features))
+        source(SRC_REPORTS)?.setGeoJson(
+            FeatureCollection.fromFeatures(features)
+        )
     }
 
     private fun pushRoutes() {
-        fun line(r: Route) = Feature.fromGeometry(LineString.fromLngLats(r.points.map { point(it) }))
-        val sel = routes.getOrNull(selectedRoute)
-        source(SRC_ROUTE)?.setGeoJson(FeatureCollection.fromFeatures(listOfNotNull(sel?.let { line(it) })))
+        fun line(route: Route) =
+            Feature.fromGeometry(
+                LineString.fromLngLats(
+                    route.points.map { point(it) }
+                )
+            )
+
+        val selected = routes.getOrNull(selectedRoute)
+
+        source(SRC_ROUTE)?.setGeoJson(
+            FeatureCollection.fromFeatures(
+                listOfNotNull(selected?.let { line(it) })
+            )
+        )
+
         source(SRC_ROUTE_ALT)?.setGeoJson(
-            FeatureCollection.fromFeatures(routes.filterIndexed { i, _ -> i != selectedRoute }.map { line(it) })
+            FeatureCollection.fromFeatures(
+                routes.filterIndexed { index, _ ->
+                    index != selectedRoute
+                }.map { line(it) }
+            )
         )
     }
 
     private fun pushSelected() {
         source(SRC_SELECTED)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOfNotNull(selectedPoint?.let { Feature.fromGeometry(point(it)) }))
+            FeatureCollection.fromFeatures(
+                listOfNotNull(
+                    selectedPoint?.let {
+                        Feature.fromGeometry(point(it))
+                    }
+                )
+            )
         )
     }
 
     private fun pushPosition() {
-        val f = fix
-        if (f == null) {
-            source(SRC_POSITION)?.setGeoJson(FeatureCollection.fromFeatures(ArrayList<Feature>()))
-            source(SRC_ACCURACY)?.setGeoJson(FeatureCollection.fromFeatures(ArrayList<Feature>()))
+        val currentFix = fix
+
+        if (currentFix == null) {
+            source(SRC_POSITION)?.setGeoJson(
+                FeatureCollection.fromFeatures(ArrayList<Feature>())
+            )
+            source(SRC_ACCURACY)?.setGeoJson(
+                FeatureCollection.fromFeatures(ArrayList<Feature>())
+            )
             return
         }
-        val pos = Feature.fromGeometry(point(f.position)).apply {
-            addNumberProperty("hb", if (heading != null) 1 else 0)
-            addNumberProperty("bearing", (heading ?: 0f).toDouble())
-        }
-        source(SRC_POSITION)?.setGeoJson(FeatureCollection.fromFeatures(listOf(pos)))
-        // Accuracy circle: metres -> pixels at zoom 22 (512px tiles), scaled down exponentially by zoom.
-        val mpp22 = 78271.52 * cos(Math.toRadians(f.position.lat)) / 2.0.pow(22)
-        val r22 = (f.accuracyM / mpp22).coerceAtMost(1.0e7)
-        val acc = Feature.fromGeometry(point(f.position)).apply {
-            addNumberProperty("r22", r22)
-            addNumberProperty("r0", r22 / 2.0.pow(22))
-        }
-        source(SRC_ACCURACY)?.setGeoJson(FeatureCollection.fromFeatures(listOf(acc)))
+
+        val positionFeature =
+            Feature.fromGeometry(point(currentFix.position)).apply {
+                addNumberProperty(
+                    "hb",
+                    if (heading != null) 1 else 0,
+                )
+                addNumberProperty(
+                    "bearing",
+                    (heading ?: 0f).toDouble(),
+                )
+            }
+
+        source(SRC_POSITION)?.setGeoJson(
+            FeatureCollection.fromFeatures(listOf(positionFeature))
+        )
+
+        val metresPerPixelAtZoom22 =
+            78271.52 * cos(Math.toRadians(currentFix.position.lat)) /
+                2.0.pow(22)
+
+        val radiusAtZoom22 =
+            (currentFix.accuracyM / metresPerPixelAtZoom22)
+                .coerceAtMost(1.0e7)
+
+        val accuracyFeature =
+            Feature.fromGeometry(point(currentFix.position)).apply {
+                addNumberProperty("r22", radiusAtZoom22)
+                addNumberProperty(
+                    "r0",
+                    radiusAtZoom22 / 2.0.pow(22),
+                )
+            }
+
+        source(SRC_ACCURACY)?.setGeoJson(
+            FeatureCollection.fromFeatures(listOf(accuracyFeature))
+        )
     }
 
-    // ---- camera -----------------------------------------------------------------------------------
+    // ---- Camera -----------------------------------------------------------------------------------
 
     fun set3d(enabled: Boolean) {
         tilt3d = enabled
         apply3d()
+
         val m = map ?: return
-        val cp = m.cameraPosition
-        val target = cp.target ?: return
+        val camera = m.cameraPosition
+        val target = camera.target ?: return
+
         m.easeCamera(
             CameraUpdateFactory.newCameraPosition(
-                CameraPosition.Builder().target(target).zoom(cp.zoom).bearing(cp.bearing).tilt(if (enabled) 60.0 else 0.0).build()
+                CameraPosition.Builder()
+                    .target(target)
+                    .zoom(camera.zoom)
+                    .bearing(camera.bearing)
+                    .tilt(if (enabled) 60.0 else 0.0)
+                    .build()
             ),
             700,
         )
     }
 
-    /** Adds real building extrusions only if the active style ships a "building" vector layer. */
     private fun apply3d() {
-        val s = style ?: return
-        s.getLayer(LYR_3D)?.let { s.removeLayer(it) }
+        val currentStyle = style ?: return
+
+        currentStyle.getLayer(LYR_3D)?.let {
+            currentStyle.removeLayer(it)
+        }
+
         if (!tilt3d) return
-        val base = findBuildingLayer(s) ?: return
-        val layer = FillExtrusionLayer(LYR_3D, base.sourceId).withSourceLayer("building").withProperties(
+
+        val base = findBuildingLayer(currentStyle) ?: return
+
+        val layer = FillExtrusionLayer(
+            LYR_3D,
+            base.sourceId,
+        ).withSourceLayer("building").withProperties(
             PropertyFactory.fillExtrusionColor("#C7CCD6"),
-            PropertyFactory.fillExtrusionHeight(Expression.get("render_height")),
-            PropertyFactory.fillExtrusionBase(Expression.get("render_min_height")),
+            PropertyFactory.fillExtrusionHeight(
+                Expression.get("render_height")
+            ),
+            PropertyFactory.fillExtrusionBase(
+                Expression.get("render_min_height")
+            ),
             PropertyFactory.fillExtrusionOpacity(0.85f),
         )
+
         layer.setMinZoom(15f)
-        s.addLayerBelow(layer, LYR_ROUTE_ALT)
+        currentStyle.addLayerBelow(layer, LYR_ROUTE_ALT)
     }
 
-    fun follow(position: LatLon, bearing: Float?, zoom: Double, tiltDeg: Double, durationMs: Int) {
+    fun follow(
+        position: LatLon,
+        bearing: Float?,
+        zoom: Double,
+        tiltDeg: Double,
+        durationMs: Int,
+    ) {
         val m = map ?: return
-        val b = CameraPosition.Builder().target(LatLng(position.lat, position.lon)).zoom(zoom).tilt(tiltDeg)
-        b.bearing(bearing?.toDouble() ?: m.cameraPosition.bearing)
-        m.easeCamera(CameraUpdateFactory.newCameraPosition(b.build()), durationMs)
+
+        val camera = CameraPosition.Builder()
+            .target(LatLng(position.lat, position.lon))
+            .zoom(zoom)
+            .tilt(tiltDeg)
+
+        camera.bearing(
+            bearing?.toDouble() ?: m.cameraPosition.bearing
+        )
+
+        m.easeCamera(
+            CameraUpdateFactory.newCameraPosition(camera.build()),
+            durationMs,
+        )
     }
 
     fun setNavigationPadding(enabled: Boolean) {
         val m = map ?: return
-        val h = mapView.height
-        if (enabled) m.setPadding(0, (h * 0.35).toInt(), 0, 0) else m.setPadding(0, 0, 0, 0)
+        val height = mapView.height
+
+        if (enabled) {
+            m.setPadding(0, (height * 0.35).toInt(), 0, 0)
+        } else {
+            m.setPadding(0, 0, 0, 0)
+        }
     }
 
     fun handle(request: CameraRequest) {
         val m = map ?: return
+
         when (request) {
-            is CameraRequest.FlyTo -> m.animateCamera(
-                CameraUpdateFactory.newCameraPosition(
-                    CameraPosition.Builder().target(LatLng(request.position.lat, request.position.lon))
-                        .zoom(request.zoom).bearing(0.0).tilt(if (tilt3d) 60.0 else 0.0).build()
-                ),
-                800,
-            )
+            is CameraRequest.FlyTo -> {
+                m.animateCamera(
+                    CameraUpdateFactory.newCameraPosition(
+                        CameraPosition.Builder()
+                            .target(
+                                LatLng(
+                                    request.position.lat,
+                                    request.position.lon,
+                                )
+                            )
+                            .zoom(request.zoom)
+                            .bearing(0.0)
+                            .tilt(if (tilt3d) 60.0 else 0.0)
+                            .build()
+                    ),
+                    800,
+                )
+            }
+
             is CameraRequest.Fit -> {
                 if (request.points.size < 2) return
-                val bounds = LatLngBounds.Builder().includes(request.points.map { LatLng(it.lat, it.lon) }).build()
-                val pad = (mapView.resources.displayMetrics.density * 48).toInt()
-                m.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, pad, pad * 3, pad, pad * 5), 900)
+
+                val bounds = LatLngBounds.Builder()
+                    .includes(
+                        request.points.map {
+                            LatLng(it.lat, it.lon)
+                        }
+                    )
+                    .build()
+
+                val padding =
+                    (mapView.resources.displayMetrics.density * 48).toInt()
+
+                m.animateCamera(
+                    CameraUpdateFactory.newLatLngBounds(
+                        bounds,
+                        padding,
+                        padding * 3,
+                        padding,
+                        padding * 5,
+                    ),
+                    900,
+                )
             }
         }
     }
 
-    // ---- input ------------------------------------------------------------------------------------
+    // ---- Input ------------------------------------------------------------------------------------
 
-    private fun handleTap(m: MapLibreMap, latLng: LatLng): Boolean {
+    private fun handleTap(
+        m: MapLibreMap,
+        latLng: LatLng,
+    ): Boolean {
         if (style == null) return false
-        val px = m.projection.toScreenLocation(latLng)
-        val rect = RectF(px.x - 28f, px.y - 28f, px.x + 28f, px.y + 28f)
-        for ((layer, kind) in listOf(LYR_SAFETY to "safety", LYR_REPORTS to "report", LYR_POI to "poi")) {
-            val hit = m.queryRenderedFeatures(rect, layer).firstOrNull() ?: continue
-            val id = hit.getStringProperty("id") ?: continue
+
+        val pixel = m.projection.toScreenLocation(latLng)
+        val rect = RectF(
+            pixel.x - 28f,
+            pixel.y - 28f,
+            pixel.x + 28f,
+            pixel.y + 28f,
+        )
+
+        for (
+            (layer, kind) in listOf(
+                LYR_SAFETY to "safety",
+                LYR_REPORTS to "report",
+                LYR_POI to "poi",
+            )
+        ) {
+            val feature = m.queryRenderedFeatures(rect, layer)
+                .firstOrNull() ?: continue
+
+            val id = feature.getStringProperty("id") ?: continue
+
             if (callbacks.onFeatureTap(kind, id)) return true
         }
-        callbacks.onMapTap(LatLon(latLng.latitude, latLng.longitude))
+
+        callbacks.onMapTap(
+            LatLon(latLng.latitude, latLng.longitude)
+        )
         return true
     }
 
     private fun arrowBitmap(): Bitmap {
-        val s = 96
-        val bmp = Bitmap.createBitmap(s, s, Bitmap.Config.ARGB_8888)
-        val c = Canvas(bmp)
+        val size = 96
+        val bitmap = Bitmap.createBitmap(
+            size,
+            size,
+            Bitmap.Config.ARGB_8888,
+        )
+
+        val canvas = Canvas(bitmap)
         val path = Path().apply {
-            moveTo(s / 2f, 6f); lineTo(s - 14f, s - 14f); lineTo(s / 2f, s - 30f); lineTo(14f, s - 14f); close()
+            moveTo(size / 2f, 6f)
+            lineTo(size - 14f, size - 14f)
+            lineTo(size / 2f, size - 30f)
+            lineTo(14f, size - 14f)
+            close()
         }
+
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.WHITE; style = Paint.Style.STROKE; strokeWidth = 10f; strokeJoin = Paint.Join.ROUND
+            color = Color.WHITE
+            style = Paint.Style.STROKE
+            strokeWidth = 10f
+            strokeJoin = Paint.Join.ROUND
         }
-        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.parseColor("#17408B"); style = Paint.Style.FILL }
-        c.drawPath(path, stroke)
-        c.drawPath(path, fill)
-        return bmp
+
+        val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#17408B")
+            style = Paint.Style.FILL
+        }
+
+        canvas.drawPath(path, stroke)
+        canvas.drawPath(path, fill)
+        return bitmap
     }
 
     companion object {
         private const val IMG_ARROW = "wain-arrow"
+
         private const val SRC_ROUTE_ALT = "src-route-alt"
         private const val SRC_ROUTE = "src-route"
         private const val SRC_SAFETY = "src-safety"
@@ -407,6 +771,7 @@ class MapController(private val mapView: MapView, private val callbacks: Callbac
         private const val SRC_SELECTED = "src-selected"
         private const val SRC_ACCURACY = "src-accuracy"
         private const val SRC_POSITION = "src-position"
+
         private const val LYR_ROUTE_ALT = "lyr-route-alt"
         private const val LYR_ROUTE_CASING = "lyr-route-casing"
         private const val LYR_ROUTE = "lyr-route"
