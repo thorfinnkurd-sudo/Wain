@@ -235,9 +235,11 @@ class WainViewModel(app: Application) : AndroidViewModel(app) {
             if (_ui.value.nav == null) selectPoint(p)
         }
 
-        override fun onMapLongPress(p: LatLon) {
-            if (_ui.value.nav == null) selectPoint(p)
-        }
+        override fun onMapLongPress(p: LatLon): Boolean {
+    if (_ui.value.nav != null) return true
+    selectPoint(p)
+    return true
+}
 
         override fun onFeatureTap(kind: String, id: String): Boolean {
             val st = _ui.value
