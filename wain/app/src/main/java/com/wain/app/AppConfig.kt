@@ -1,13 +1,13 @@
-
 package com.wain.app
 
 /**
  * Runtime configuration for Wain.
- * Uses OpenFreeMap for detailed map tiles by default.
+ * OpenFreeMap vector maps and navigation services.
  */
 object AppConfig {
+
     const val DEFAULT_MAP_STYLE =
-        "https://tiles.openfreemap.org/styles/liberty"
+        "https://tiles.openfreemap.org/styles/bright"
 
     const val DEMO_ROUTING =
         "https://valhalla1.openstreetmap.de"
