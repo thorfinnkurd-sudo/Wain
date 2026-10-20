@@ -1,0 +1,74 @@
+name: Build Wain debug APK
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      # Optional configuration. Leave the secrets unset to build with the development defaults.
+      # These end up inside the APK, so only use client-side keys restricted to this app.
+      WAIN_MAP_STYLE_URL: ${{ secrets.WAIN_MAP_STYLE_URL }}
+      WAIN_MAP_STYLE_DARK_URL: ${{ secrets.WAIN_MAP_STYLE_DARK_URL }}
+      WAIN_ROUTING_URL: ${{ secrets.WAIN_ROUTING_URL }}
+      WAIN_ROUTING_API_KEY: ${{ secrets.WAIN_ROUTING_API_KEY }}
+      WAIN_GEOCODER_URL: ${{ secrets.WAIN_GEOCODER_URL }}
+      WAIN_OVERPASS_URL: ${{ secrets.WAIN_OVERPASS_URL }}
+      WAIN_SUPABASE_URL: ${{ secrets.WAIN_SUPABASE_URL }}
+      WAIN_SUPABASE_ANON_KEY: ${{ secrets.WAIN_SUPABASE_ANON_KEY }}
+      WAIN_CONTACT: ${{ secrets.WAIN_CONTACT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: wain-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Unit tests
+        if: always()
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wain-unit-test-reports
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+
+      - name: Android lint
+        if: always()
+        continue-on-error: true
+        run: gradle --no-daemon :app:lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wain-lint-report
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore

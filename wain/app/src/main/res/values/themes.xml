@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Wain" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/wain_lapis</item>
+    </style>
+
+    <style name="Theme.Wain.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/wain_lapis</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.Wain</item>
+    </style>
+</resources>

@@ -1,0 +1,29 @@
+package com.wain.app
+
+/**
+ * Runtime configuration, injected at build time from environment variables / local.properties
+ * (see app/build.gradle.kts). Contains only client-side values; never put privileged keys here.
+ */
+object AppConfig {
+    const val DEMO_STYLE = "https://demotiles.maplibre.org/style.json"
+    const val DEMO_ROUTING = "https://valhalla1.openstreetmap.de"
+    const val DEFAULT_GEOCODER = "https://nominatim.openstreetmap.org"
+    const val DEFAULT_OVERPASS = "https://overpass-api.de/api/interpreter"
+
+    val mapStyleUrl: String get() = BuildConfig.MAP_STYLE_URL.ifBlank { DEMO_STYLE }
+    val mapStyleDarkUrl: String get() = BuildConfig.MAP_STYLE_DARK_URL.ifBlank { mapStyleUrl }
+    val isDemoStyle: Boolean get() = BuildConfig.MAP_STYLE_URL.isBlank()
+
+    val routingUrl: String get() = BuildConfig.ROUTING_URL.ifBlank { DEMO_ROUTING }.trimEnd('/')
+    val isDemoRouting: Boolean get() = BuildConfig.ROUTING_URL.isBlank()
+    val routingApiKey: String get() = BuildConfig.ROUTING_API_KEY
+
+    val geocoderUrl: String get() = BuildConfig.GEOCODER_URL.ifBlank { DEFAULT_GEOCODER }.trimEnd('/')
+    val overpassUrl: String get() = BuildConfig.OVERPASS_URL.ifBlank { DEFAULT_OVERPASS }
+
+    val supabaseUrl: String get() = BuildConfig.SUPABASE_URL.trimEnd('/')
+    val supabaseAnonKey: String get() = BuildConfig.SUPABASE_ANON_KEY
+    val sharedReportsConfigured: Boolean get() = supabaseUrl.isNotBlank() && supabaseAnonKey.isNotBlank()
+
+    val userAgent: String get() = "WainNavigation/${BuildConfig.VERSION_NAME} (${BuildConfig.CONTACT})"
+}
