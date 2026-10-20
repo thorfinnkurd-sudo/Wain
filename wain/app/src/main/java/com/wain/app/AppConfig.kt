@@ -1,3 +1,4 @@
+
 package com.wain.app
 
 /**
@@ -7,7 +8,10 @@ package com.wain.app
 object AppConfig {
 
     const val DEFAULT_MAP_STYLE =
-        "https://tiles.openfreemap.org/styles/bright"
+        "https://tiles.openfreemap.org/styles/liberty"
+
+    const val DEFAULT_MAP_STYLE_DARK =
+        "https://tiles.openfreemap.org/styles/dark"
 
     const val DEMO_ROUTING =
         "https://valhalla1.openstreetmap.de"
@@ -19,14 +23,14 @@ object AppConfig {
         "https://overpass-api.de/api/interpreter"
 
     val mapStyleUrl: String
-        get() = BuildConfig.MAP_STYLE_URL.ifBlank {
-            DEFAULT_MAP_STYLE
-        }
+        get() = BuildConfig.MAP_STYLE_URL
+            .trim()
+            .ifBlank { DEFAULT_MAP_STYLE }
 
     val mapStyleDarkUrl: String
-        get() = BuildConfig.MAP_STYLE_DARK_URL.ifBlank {
-            mapStyleUrl
-        }
+        get() = BuildConfig.MAP_STYLE_DARK_URL
+            .trim()
+            .ifBlank { DEFAULT_MAP_STYLE_DARK }
 
     val isDemoStyle: Boolean
         get() = false
