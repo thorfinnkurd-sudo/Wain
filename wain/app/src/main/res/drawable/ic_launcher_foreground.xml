@@ -6,7 +6,6 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <!-- Clean white road forming a distinctive W -->
     <path
         android:fillColor="#FFFFFFFF"
         android:pathData="M21,32
@@ -29,7 +28,6 @@
             C38,75 36,73 35,70
             Z" />
 
-    <!-- Bright lime navigation marker -->
     <path
         android:fillColor="#D7FF35"
         android:pathData="M54,16
@@ -38,7 +36,6 @@
             C54,48 68,38 68,30
             C68,22 62,16 54,16 Z" />
 
-    <!-- Blue center creates a crisp marker detail -->
     <path
         android:fillColor="#1769FF"
         android:pathData="M54,23
