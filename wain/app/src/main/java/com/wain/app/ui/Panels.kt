@@ -868,7 +868,7 @@ internal fun ReportPanel(ui: UiState, vm: WainViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .clickable(enabled = false) {},
+                .clickable(onClick = {}) ,
         ) {
             Column(
                 Modifier
@@ -1009,6 +1009,76 @@ internal fun SettingsOverlay(
                 }
             }
 
+            Text(
+                when (ui.language) {
+                    "ar" -> "المظهر"
+                    "ckb" -> "ڕووکار"
+                    else -> "Appearance"
+                },
+                fontWeight = FontWeight.Bold,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    "system" to when (ui.language) {
+                        "ar" -> "النظام"
+                        "ckb" -> "سیستەم"
+                        else -> "System"
+                    },
+                    "light" to when (ui.language) {
+                        "ar" -> "فاتح"
+                        "ckb" -> "ڕووناک"
+                        else -> "Light"
+                    },
+                    "dark" to when (ui.language) {
+                        "ar" -> "داكن"
+                        "ckb" -> "تاریک"
+                        else -> "Dark"
+                    },
+                ).forEach { (mode, label) ->
+                    FilterChip(
+                        selected = s.themeMode == mode,
+                        onClick = { vm.setThemeMode(mode) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+
+            Text(
+                when (ui.language) {
+                    "ar" -> "حجم الواجهة"
+                    "ckb" -> "قەبارەی ڕووکار"
+                    else -> "Interface size"
+                },
+                fontWeight = FontWeight.Bold,
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    0 to when (ui.language) {
+                        "ar" -> "عادي"
+                        "ckb" -> "ئاسایی"
+                        else -> "Standard"
+                    },
+                    1 to when (ui.language) {
+                        "ar" -> "كبير"
+                        "ckb" -> "گەورە"
+                        else -> "Large"
+                    },
+                    2 to when (ui.language) {
+                        "ar" -> "كبير جداً"
+                        "ckb" -> "زۆر گەورە"
+                        else -> "Extra large"
+                    },
+                ).forEach { (scale, label) ->
+                    FilterChip(
+                        selected = s.uiScale == scale,
+                        onClick = { vm.setUiScale(scale) },
+                        label = { Text(label) },
+                    )
+                }
+            }
+
             Text(stringResource(R.string.settings_units), fontWeight = FontWeight.Bold)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1029,10 +1099,10 @@ internal fun SettingsOverlay(
             Text(stringResource(R.string.settings_tolerance, s.toleranceKmh))
 
             Slider(
-                value = s.toleranceKmh.toFloat(),
+                value = s.toleranceKmh.coerceIn(0, 30).toFloat(),
                 onValueChange = { vm.setTolerance(it.roundToInt()) },
-                valueRange = 0f..20f,
-                steps = 19,
+                valueRange = 0f..30f,
+                steps = 29,
                 enabled = s.speedWarning,
             )
 
