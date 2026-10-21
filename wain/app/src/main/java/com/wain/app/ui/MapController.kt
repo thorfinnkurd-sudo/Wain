@@ -43,8 +43,10 @@ sealed interface CameraRequest {
 }
 
 /**
- * MapLibre controller.
- * Handles map styles, overlays, camera and user location.
+ * Wain Map Controller.
+ *
+ * Manages the map style, navigation overlays, user location,
+ * route rendering, camera behaviour and map interactions.
  */
 class MapController(
     private val mapView: MapView,
@@ -138,18 +140,31 @@ class MapController(
         }
     }
 
-    // ---- Style loading -------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Map style
+    // -------------------------------------------------------------------------
 
     fun setStyle(url: String) {
-        requestedStyle = url
+        val normalizedUrl = url.trim()
 
-        if (map != null && (url != appliedStyle || style == null)) {
-            applyStyle(url, force = true)
+        if (normalizedUrl.isBlank()) {
+            callbacks.onMapError("Map style URL is empty.")
+            return
+        }
+
+        requestedStyle = normalizedUrl
+
+        if (
+            map != null &&
+            (normalizedUrl != appliedStyle || style == null)
+        ) {
+            applyStyle(normalizedUrl, force = true)
         }
     }
 
     fun reloadStyle() {
         val url = requestedStyle ?: appliedStyle
+
         if (url != null && map != null) {
             applyStyle(url, force = true)
         }
@@ -176,27 +191,35 @@ class MapController(
 
                 try {
                     installLayers(loadedStyle)
+
                     callbacks.onStyleLoaded(
                         findBuildingLayer(loadedStyle) != null
                     )
+
                     pushAll()
                     apply3d()
                 } catch (e: Exception) {
                     style = null
+
                     callbacks.onMapError(
-                        "Map style loaded, but layer setup failed: " +
+                        "Map style loaded, but Wain layers failed: " +
                             (e.message ?: e.javaClass.simpleName)
                     )
                 }
             }
         } catch (e: Exception) {
             style = null
+
             callbacks.onMapError(
                 "Could not start map style loading: " +
                     (e.message ?: e.javaClass.simpleName)
             )
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Wain map layers
+    // -------------------------------------------------------------------------
 
     private fun installLayers(s: Style) {
         s.addImage(IMG_ARROW, arrowBitmap())
@@ -220,29 +243,34 @@ class MapController(
             }
         }
 
+        // Alternative route: muted blue-grey.
         s.addLayer(
             LineLayer(LYR_ROUTE_ALT, SRC_ROUTE_ALT).withProperties(
-                PropertyFactory.lineColor("#8A97AD"),
-                PropertyFactory.lineWidth(6f),
-                PropertyFactory.lineOpacity(0.85f),
+                PropertyFactory.lineColor("#8795AB"),
+                PropertyFactory.lineWidth(5f),
+                PropertyFactory.lineOpacity(0.75f),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
         )
 
+        // Dark casing makes the active route stand out against the map.
         s.addLayer(
             LineLayer(LYR_ROUTE_CASING, SRC_ROUTE).withProperties(
-                PropertyFactory.lineColor("#0B2A66"),
+                PropertyFactory.lineColor("#15366F"),
                 PropertyFactory.lineWidth(11f),
+                PropertyFactory.lineOpacity(0.96f),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
         )
 
+        // Wain signature blue route.
         s.addLayer(
             LineLayer(LYR_ROUTE, SRC_ROUTE).withProperties(
-                PropertyFactory.lineColor("#3D8BFF"),
+                PropertyFactory.lineColor("#3478F6"),
                 PropertyFactory.lineWidth(7f),
+                PropertyFactory.lineOpacity(1f),
                 PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
                 PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND),
             )
@@ -251,6 +279,7 @@ class MapController(
         s.addLayer(circleLayer(LYR_SAFETY, SRC_SAFETY, 7f))
         s.addLayer(circleLayer(LYR_REPORTS, SRC_REPORTS, 9f))
 
+        // Place markers scale smoothly as the map zoom changes.
         s.addLayer(
             CircleLayer(LYR_POI, SRC_POI).withProperties(
                 PropertyFactory.circleRadius(
@@ -264,39 +293,43 @@ class MapController(
                 PropertyFactory.circleColor(
                     Expression.toColor(Expression.get("color"))
                 ),
-                PropertyFactory.circleStrokeWidth(1.5f),
+                PropertyFactory.circleStrokeWidth(1.7f),
                 PropertyFactory.circleStrokeColor("#FFFFFF"),
             )
         )
 
+        // Labels are kept at street-level zoom to avoid clutter.
         val labels = SymbolLayer(LYR_POI_LABEL, SRC_POI).withProperties(
             PropertyFactory.textField(Expression.get("label")),
             PropertyFactory.textSize(12f),
             PropertyFactory.textOffset(arrayOf(0f, 1.1f)),
             PropertyFactory.textAnchor(Property.TEXT_ANCHOR_TOP),
-            PropertyFactory.textColor("#1B1F2A"),
+            PropertyFactory.textColor("#172033"),
             PropertyFactory.textHaloColor("#FFFFFF"),
-            PropertyFactory.textHaloWidth(1.5f),
+            PropertyFactory.textHaloWidth(1.6f),
             PropertyFactory.textOptional(true),
         )
+
         labels.setMinZoom(15f)
         s.addLayer(labels)
 
+        // Selected destination.
         s.addLayer(
             CircleLayer(LYR_SELECTED, SRC_SELECTED).withProperties(
                 PropertyFactory.circleRadius(10f),
-                PropertyFactory.circleColor("#F2B01E"),
+                PropertyFactory.circleColor("#FFC857"),
                 PropertyFactory.circleStrokeWidth(3f),
-                PropertyFactory.circleStrokeColor("#17408B"),
+                PropertyFactory.circleStrokeColor("#153C9B"),
             )
         )
 
+        // GPS accuracy area.
         s.addLayer(
             CircleLayer(LYR_ACCURACY, SRC_ACCURACY).withProperties(
-                PropertyFactory.circleColor("#3D8BFF"),
-                PropertyFactory.circleOpacity(0.15f),
-                PropertyFactory.circleStrokeColor("#3D8BFF"),
-                PropertyFactory.circleStrokeWidth(1f),
+                PropertyFactory.circleColor("#3478F6"),
+                PropertyFactory.circleOpacity(0.13f),
+                PropertyFactory.circleStrokeColor("#3478F6"),
+                PropertyFactory.circleStrokeWidth(1.2f),
                 PropertyFactory.circlePitchAlignment(
                     Property.CIRCLE_PITCH_ALIGNMENT_MAP
                 ),
@@ -311,55 +344,59 @@ class MapController(
             )
         )
 
-        // Outer soft green glow.
-        val glowOuter = CircleLayer(
-            LYR_POS_GLOW_OUTER,
-            SRC_POSITION,
-        ).withProperties(
-            PropertyFactory.circleRadius(30f),
-            PropertyFactory.circleColor("#20C968"),
-            PropertyFactory.circleOpacity(0.14f),
-            PropertyFactory.circleBlur(0.9f),
+        // Outer location halo.
+        s.addLayer(
+            CircleLayer(
+                LYR_POS_GLOW_OUTER,
+                SRC_POSITION,
+            ).withProperties(
+                PropertyFactory.circleRadius(27f),
+                PropertyFactory.circleColor("#3478F6"),
+                PropertyFactory.circleOpacity(0.12f),
+                PropertyFactory.circleBlur(0.9f),
+            )
         )
-        s.addLayer(glowOuter)
 
-        // Inner glow for a brighter, more polished marker.
-        val glowInner = CircleLayer(
-            LYR_POS_GLOW_INNER,
-            SRC_POSITION,
-        ).withProperties(
-            PropertyFactory.circleRadius(21f),
-            PropertyFactory.circleColor("#20C968"),
-            PropertyFactory.circleOpacity(0.27f),
-            PropertyFactory.circleBlur(0.65f),
+        // Inner location halo.
+        s.addLayer(
+            CircleLayer(
+                LYR_POS_GLOW_INNER,
+                SRC_POSITION,
+            ).withProperties(
+                PropertyFactory.circleRadius(18f),
+                PropertyFactory.circleColor("#3478F6"),
+                PropertyFactory.circleOpacity(0.22f),
+                PropertyFactory.circleBlur(0.65f),
+            )
         )
-        s.addLayer(glowInner)
 
-        // Large green position dot with a clean white outline.
+        // Compact position dot when no heading is available.
         val dot = CircleLayer(
             LYR_POS_DOT,
             SRC_POSITION,
         ).withProperties(
-            PropertyFactory.circleRadius(14f),
-            PropertyFactory.circleColor("#20C968"),
-            PropertyFactory.circleStrokeWidth(4f),
+            PropertyFactory.circleRadius(10f),
+            PropertyFactory.circleColor("#3478F6"),
+            PropertyFactory.circleStrokeWidth(3.5f),
             PropertyFactory.circleStrokeColor("#FFFFFF"),
         )
+
         dot.setFilter(
             Expression.eq(
                 Expression.get("hb"),
                 Expression.literal(0),
             )
         )
+
         s.addLayer(dot)
 
-        // Direction arrow shown when a heading is available.
+        // Direction arrow when heading is available.
         val arrow = SymbolLayer(
             LYR_POS_ARROW,
             SRC_POSITION,
         ).withProperties(
             PropertyFactory.iconImage(IMG_ARROW),
-            PropertyFactory.iconSize(0.85f),
+            PropertyFactory.iconSize(0.92f),
             PropertyFactory.iconRotate(Expression.get("bearing")),
             PropertyFactory.iconRotationAlignment(
                 Property.ICON_ROTATION_ALIGNMENT_MAP
@@ -367,12 +404,14 @@ class MapController(
             PropertyFactory.iconAllowOverlap(true),
             PropertyFactory.iconIgnorePlacement(true),
         )
+
         arrow.setFilter(
             Expression.eq(
                 Expression.get("hb"),
                 Expression.literal(1),
             )
         )
+
         s.addLayer(arrow)
     }
 
@@ -393,7 +432,9 @@ class MapController(
         s.layers.filterIsInstance<FillLayer>()
             .firstOrNull { it.sourceLayer == "building" }
 
-    // ---- Data ----------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Data updates
+    // -------------------------------------------------------------------------
 
     fun setPois(list: List<Poi>, lang: String) {
         pois = list
@@ -440,7 +481,8 @@ class MapController(
     private fun source(id: String): GeoJsonSource? =
         style?.getSourceAs<GeoJsonSource>(id)
 
-    private fun point(p: LatLon) = Point.fromLngLat(p.lon, p.lat)
+    private fun point(p: LatLon) =
+        Point.fromLngLat(p.lon, p.lat)
 
     private fun pushPois() {
         val features = pois.map { p ->
@@ -534,11 +576,17 @@ class MapController(
 
         if (currentFix == null) {
             source(SRC_POSITION)?.setGeoJson(
-                FeatureCollection.fromFeatures(ArrayList<Feature>())
+                FeatureCollection.fromFeatures(
+                    ArrayList<Feature>()
+                )
             )
+
             source(SRC_ACCURACY)?.setGeoJson(
-                FeatureCollection.fromFeatures(ArrayList<Feature>())
+                FeatureCollection.fromFeatures(
+                    ArrayList<Feature>()
+                )
             )
+
             return
         }
 
@@ -555,11 +603,14 @@ class MapController(
             }
 
         source(SRC_POSITION)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOf(positionFeature))
+            FeatureCollection.fromFeatures(
+                listOf(positionFeature)
+            )
         )
 
         val metresPerPixelAtZoom22 =
-            78271.52 * cos(Math.toRadians(currentFix.position.lat)) /
+            78271.52 *
+                cos(Math.toRadians(currentFix.position.lat)) /
                 2.0.pow(22)
 
         val radiusAtZoom22 =
@@ -576,11 +627,15 @@ class MapController(
             }
 
         source(SRC_ACCURACY)?.setGeoJson(
-            FeatureCollection.fromFeatures(listOf(accuracyFeature))
+            FeatureCollection.fromFeatures(
+                listOf(accuracyFeature)
+            )
         )
     }
 
-    // ---- Camera --------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Camera and navigation
+    // -------------------------------------------------------------------------
 
     fun set3d(enabled: Boolean) {
         tilt3d = enabled
@@ -618,14 +673,14 @@ class MapController(
             LYR_3D,
             base.sourceId,
         ).withSourceLayer("building").withProperties(
-            PropertyFactory.fillExtrusionColor("#C7CCD6"),
+            PropertyFactory.fillExtrusionColor("#AAB8D0"),
             PropertyFactory.fillExtrusionHeight(
                 Expression.get("render_height")
             ),
             PropertyFactory.fillExtrusionBase(
                 Expression.get("render_min_height")
             ),
-            PropertyFactory.fillExtrusionOpacity(0.85f),
+            PropertyFactory.fillExtrusionOpacity(0.82f),
         )
 
         layer.setMinZoom(15f)
@@ -718,7 +773,9 @@ class MapController(
         }
     }
 
-    // ---- Input ----------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // Map interactions
+    // -------------------------------------------------------------------------
 
     private fun handleTap(
         m: MapLibreMap,
@@ -727,6 +784,7 @@ class MapController(
         if (style == null) return false
 
         val pixel = m.projection.toScreenLocation(latLng)
+
         val rect = RectF(
             pixel.x - 28f,
             pixel.y - 28f,
@@ -752,11 +810,17 @@ class MapController(
         callbacks.onMapTap(
             LatLon(latLng.latitude, latLng.longitude)
         )
+
         return true
     }
 
+    // -------------------------------------------------------------------------
+    // Custom Wain navigation arrow
+    // -------------------------------------------------------------------------
+
     private fun arrowBitmap(): Bitmap {
         val size = 128
+
         val bitmap = Bitmap.createBitmap(
             size,
             size,
@@ -764,33 +828,43 @@ class MapController(
         )
 
         val canvas = Canvas(bitmap)
+
         val path = Path().apply {
-            moveTo(64f, 8f)
-            cubicTo(68f, 8f, 71f, 12f, 73f, 17f)
-            lineTo(116f, 108f)
-            cubicTo(120f, 117f, 113f, 122f, 105f, 117f)
-            lineTo(64f, 91f)
-            lineTo(23f, 117f)
-            cubicTo(15f, 122f, 8f, 117f, 12f, 108f)
-            lineTo(55f, 17f)
-            cubicTo(57f, 12f, 60f, 8f, 64f, 8f)
+            moveTo(64f, 5f)
+            cubicTo(69f, 5f, 72f, 10f, 75f, 16f)
+            lineTo(119f, 108f)
+            cubicTo(123f, 117f, 116f, 124f, 107f, 119f)
+            lineTo(64f, 94f)
+            lineTo(21f, 119f)
+            cubicTo(12f, 124f, 5f, 117f, 9f, 108f)
+            lineTo(53f, 16f)
+            cubicTo(56f, 10f, 59f, 5f, 64f, 5f)
             close()
+        }
+
+        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(55, 10, 25, 55)
+            style = Paint.Style.STROKE
+            strokeWidth = 15f
+            strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
         }
 
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.STROKE
-            strokeWidth = 9f
+            strokeWidth = 10f
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
         }
 
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#20C968")
+            color = Color.parseColor("#3478F6")
             style = Paint.Style.FILL
             isAntiAlias = true
         }
 
+        canvas.drawPath(path, shadow)
         canvas.drawPath(path, stroke)
         canvas.drawPath(path, fill)
 
