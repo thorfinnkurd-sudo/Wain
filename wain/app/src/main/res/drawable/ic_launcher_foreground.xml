@@ -4,16 +4,66 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
 
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M21,32 C21,29 23,27 26,27 C28,27 30,29 31,32 L41,58 L49,40 C50,37 52,36 54,36 C56,36 58,37 59,40 L67,58 L77,32 C78,29 80,27 83,27 C86,27 88,29 87,32 L73,70 C72,73 70,75 67,75 C64,75 62,73 61,70 L54,54 L47,70 C46,73 44,75 41,75 C38,75 36,73 35,70 Z" />
+    <!-- Premium Wain identity: deep-blue canvas is provided by the icon background -->
 
+    <!-- Soft inner halo -->
     <path
-        android:fillColor="#D7FF35"
-        android:pathData="M54,16 C46,16 40,22 40,30 C40,38 54,48 54,48 C54,48 68,38 68,30 C68,22 62,16 54,16 Z" />
+        android:fillColor="#182B50"
+        android:pathData="M15,20 Q15,15 21,15 L87,15 Q93,15 93,21 L93,87 Q93,93 87,93 L21,93 Q15,93 15,87 Z" />
 
+    <!-- Main flowing W ribbon -->
     <path
-        android:fillColor="#1769FF"
-        android:pathData="M54,23 C50,23 47,26 47,30 C47,34 50,37 54,37 C58,37 61,34 61,30 C61,26 58,23 54,23 Z" />
+        android:fillColor="#48E0E5"
+        android:pathData="M22,31
+            C21,27 24,24 28,24
+            C31,24 33,26 34,30
+            L43,59
+            L51,39
+            C52,36 54,34 57,34
+            C60,34 62,36 63,39
+            L71,59
+            L80,30
+            C81,26 83,24 87,24
+            C91,24 93,27 92,31
+            L79,72
+            C78,76 75,79 71,79
+            C67,79 65,77 63,73
+            L56,55
+            L49,73
+            C47,77 45,79 41,79
+            C37,79 34,76 33,72 Z" />
+
+    <!-- Elegant road-like negative-space highlight -->
+    <path
+        android:fillColor="#10213D"
+        android:pathData="M40,32
+            L49,59
+            L54,47
+            L59,59
+            L68,32
+            L74,32
+            L65,64
+            C64,67 62,69 59,69
+            C56,69 54,67 53,64
+            L51,59
+            L49,64
+            C48,67 46,69 43,69
+            C40,69 38,67 37,64
+            L29,32 Z" />
+
+    <!-- Warm gold signature accent -->
+    <path
+        android:fillColor="#FFC857"
+        android:pathData="M76,17
+            C80,17 83,20 83,24
+            C83,28 80,31 76,31
+            C72,31 69,28 69,24
+            C69,20 72,17 76,17 Z" />
+
+    <!-- Subtle cyan finish -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillAlpha="0.82"
+        android:pathData="M29,28 L39,59 L42,51 L34,28 Z" />
 
 </vector>
