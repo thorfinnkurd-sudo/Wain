@@ -317,12 +317,14 @@ class MapController(
             )
         )
 
-        val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
-            PropertyFactory.circleRadius(8f),
-            PropertyFactory.circleColor("#17408B"),
-            PropertyFactory.circleStrokeWidth(3f),
-            PropertyFactory.circleStrokeColor("#FFFFFF"),
-        )
+        
+val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
+    PropertyFactory.circleRadius(14f),
+    PropertyFactory.circleColor("#20C968"),
+    PropertyFactory.circleStrokeWidth(4f),
+    PropertyFactory.circleStrokeColor("#FFFFFF"),
+)
+
         dot.setFilter(
             Expression.eq(
                 Expression.get("hb"),
