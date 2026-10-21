@@ -1,4 +1,3 @@
-
 package com.wain.app.ui
 
 import android.widget.Toast
