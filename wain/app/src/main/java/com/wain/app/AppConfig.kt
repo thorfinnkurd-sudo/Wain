@@ -1,4 +1,3 @@
-
 package com.wain.app
 
 /**
@@ -10,8 +9,11 @@ object AppConfig {
     const val DEFAULT_MAP_STYLE =
         "https://tiles.openfreemap.org/styles/liberty"
 
+    // Temporary: keep the map readable even when the phone
+    // is using dark mode. An in-app appearance setting will
+    // replace this behavior in a later step.
     const val DEFAULT_MAP_STYLE_DARK =
-        "https://tiles.openfreemap.org/styles/dark"
+        "https://tiles.openfreemap.org/styles/liberty"
 
     const val DEMO_ROUTING =
         "https://valhalla1.openstreetmap.de"
