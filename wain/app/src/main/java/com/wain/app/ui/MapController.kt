@@ -1,4 +1,3 @@
-
 package com.wain.app.ui
 
 import android.graphics.Bitmap
@@ -45,7 +44,7 @@ sealed interface CameraRequest {
 
 /**
  * MapLibre controller.
- * Handles base-map style loading, map overlays, camera and user location.
+ * Handles map styles, overlays, camera and user location.
  */
 class MapController(
     private val mapView: MapView,
@@ -135,13 +134,11 @@ class MapController(
         }
 
         mapView.addOnDidFailLoadingMapListener { message ->
-            callbacks.onMapError(
-                "Map loading failed: $message"
-            )
+            callbacks.onMapError("Map loading failed: $message")
         }
     }
 
-    // ---- Style loading ---------------------------------------------------------------------------
+    // ---- Style loading -------------------------------------------------------
 
     fun setStyle(url: String) {
         requestedStyle = url
@@ -151,10 +148,6 @@ class MapController(
         }
     }
 
-    /**
-     * Can be called to retry a failed style load, even when the URL
-     * is unchanged.
-     */
     fun reloadStyle() {
         val url = requestedStyle ?: appliedStyle
         if (url != null && map != null) {
@@ -175,8 +168,9 @@ class MapController(
 
         try {
             m.setStyle(Style.Builder().fromUri(url)) { loadedStyle ->
-                // Ignore callbacks from an older style request.
-                if (generation != styleLoadGeneration) return@setStyle
+                if (generation != styleLoadGeneration) {
+                    return@setStyle
+                }
 
                 style = loadedStyle
 
@@ -317,14 +311,40 @@ class MapController(
             )
         )
 
-        
-val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
-    PropertyFactory.circleRadius(14f),
-    PropertyFactory.circleColor("#20C968"),
-    PropertyFactory.circleStrokeWidth(4f),
-    PropertyFactory.circleStrokeColor("#FFFFFF"),
-)
+        // Outer soft green glow.
+        val glowOuter = CircleLayer(
+            LYR_POS_GLOW_OUTER,
+            SRC_POSITION,
+        ).withProperties(
+            PropertyFactory.circleRadius(30f),
+            PropertyFactory.circleColor("#20C968"),
+            PropertyFactory.circleOpacity(0.14f),
+            PropertyFactory.circleBlur(0.9f),
+        )
+        s.addLayer(glowOuter)
 
+        // Inner glow for a brighter, more polished marker.
+        val glowInner = CircleLayer(
+            LYR_POS_GLOW_INNER,
+            SRC_POSITION,
+        ).withProperties(
+            PropertyFactory.circleRadius(21f),
+            PropertyFactory.circleColor("#20C968"),
+            PropertyFactory.circleOpacity(0.27f),
+            PropertyFactory.circleBlur(0.65f),
+        )
+        s.addLayer(glowInner)
+
+        // Large green position dot with a clean white outline.
+        val dot = CircleLayer(
+            LYR_POS_DOT,
+            SRC_POSITION,
+        ).withProperties(
+            PropertyFactory.circleRadius(14f),
+            PropertyFactory.circleColor("#20C968"),
+            PropertyFactory.circleStrokeWidth(4f),
+            PropertyFactory.circleStrokeColor("#FFFFFF"),
+        )
         dot.setFilter(
             Expression.eq(
                 Expression.get("hb"),
@@ -333,9 +353,13 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
         )
         s.addLayer(dot)
 
-        val arrow = SymbolLayer(LYR_POS_ARROW, SRC_POSITION).withProperties(
+        // Direction arrow shown when a heading is available.
+        val arrow = SymbolLayer(
+            LYR_POS_ARROW,
+            SRC_POSITION,
+        ).withProperties(
             PropertyFactory.iconImage(IMG_ARROW),
-            PropertyFactory.iconSize(0.7f),
+            PropertyFactory.iconSize(0.85f),
             PropertyFactory.iconRotate(Expression.get("bearing")),
             PropertyFactory.iconRotationAlignment(
                 Property.ICON_ROTATION_ALIGNMENT_MAP
@@ -369,7 +393,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
         s.layers.filterIsInstance<FillLayer>()
             .firstOrNull { it.sourceLayer == "building" }
 
-    // ---- Data -------------------------------------------------------------------------------------
+    // ---- Data ----------------------------------------------------------------
 
     fun setPois(list: List<Poi>, lang: String) {
         pois = list
@@ -429,6 +453,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
                 )
             }
         }
+
         source(SRC_POI)?.setGeoJson(
             FeatureCollection.fromFeatures(features)
         )
@@ -448,6 +473,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
                 )
             }
         }
+
         source(SRC_SAFETY)?.setGeoJson(
             FeatureCollection.fromFeatures(features)
         )
@@ -460,6 +486,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
                 addStringProperty("color", r.type.colorHex)
             }
         }
+
         source(SRC_REPORTS)?.setGeoJson(
             FeatureCollection.fromFeatures(features)
         )
@@ -553,7 +580,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
         )
     }
 
-    // ---- Camera -----------------------------------------------------------------------------------
+    // ---- Camera --------------------------------------------------------------
 
     fun set3d(enabled: Boolean) {
         tilt3d = enabled
@@ -691,7 +718,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
         }
     }
 
-    // ---- Input ------------------------------------------------------------------------------------
+    // ---- Input ----------------------------------------------------------------
 
     private fun handleTap(
         m: MapLibreMap,
@@ -729,7 +756,7 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
     }
 
     private fun arrowBitmap(): Bitmap {
-        val size = 96
+        val size = 128
         val bitmap = Bitmap.createBitmap(
             size,
             size,
@@ -738,27 +765,35 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
 
         val canvas = Canvas(bitmap)
         val path = Path().apply {
-            moveTo(size / 2f, 6f)
-            lineTo(size - 14f, size - 14f)
-            lineTo(size / 2f, size - 30f)
-            lineTo(14f, size - 14f)
+            moveTo(64f, 8f)
+            cubicTo(68f, 8f, 71f, 12f, 73f, 17f)
+            lineTo(116f, 108f)
+            cubicTo(120f, 117f, 113f, 122f, 105f, 117f)
+            lineTo(64f, 91f)
+            lineTo(23f, 117f)
+            cubicTo(15f, 122f, 8f, 117f, 12f, 108f)
+            lineTo(55f, 17f)
+            cubicTo(57f, 12f, 60f, 8f, 64f, 8f)
             close()
         }
 
         val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
             style = Paint.Style.STROKE
-            strokeWidth = 10f
+            strokeWidth = 9f
             strokeJoin = Paint.Join.ROUND
+            strokeCap = Paint.Cap.ROUND
         }
 
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#17408B")
+            color = Color.parseColor("#20C968")
             style = Paint.Style.FILL
+            isAntiAlias = true
         }
 
         canvas.drawPath(path, stroke)
         canvas.drawPath(path, fill)
+
         return bitmap
     }
 
@@ -783,6 +818,8 @@ val dot = CircleLayer(LYR_POS_DOT, SRC_POSITION).withProperties(
         private const val LYR_POI_LABEL = "lyr-poi-label"
         private const val LYR_SELECTED = "lyr-selected"
         private const val LYR_ACCURACY = "lyr-accuracy"
+        private const val LYR_POS_GLOW_OUTER = "lyr-pos-glow-outer"
+        private const val LYR_POS_GLOW_INNER = "lyr-pos-glow-inner"
         private const val LYR_POS_DOT = "lyr-pos-dot"
         private const val LYR_POS_ARROW = "lyr-pos-arrow"
         private const val LYR_3D = "lyr-3d-buildings"
