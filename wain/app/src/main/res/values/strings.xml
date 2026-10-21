@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Wain?</string>
+    <string name="app_name">Wain</string>
     <string name="search_hint">Where to?</string>
     <string name="cd_search">Search</string>
     <string name="cd_settings">Settings</string>
@@ -41,7 +41,7 @@
     <string name="gps_poor">GPS accuracy is low (±%1$d m)</string>
     <string name="gps_stale">GPS signal lost</string>
     <string name="perm_title">Location access</string>
-    <string name="perm_body">Wain? uses your location to show where you are and guide you turn by turn. It is used only while the app is open.</string>
+    <string name="perm_body">Wain uses your location to show where you are and guide you turn by turn. It is used only while the app is open.</string>
     <string name="perm_grant">Allow location</string>
     <string name="perm_denied">Location permission is off. Enable it in system settings to see your position.</string>
     <string name="perm_open_settings">Open settings</string>
@@ -99,7 +99,7 @@
     <string name="svc_traffic_none">Live traffic: not available (no traffic data provider configured)</string>
     <string name="settings_attribution">Map data © OpenStreetMap contributors (ODbL).</string>
     <string name="settings_privacy_note">Your location is used on the device and sent only to the routing/search/map services above when needed. Reports send a random device ID for rate limiting, not your name.</string>
-    <string name="settings_about">Wain? version %1$s</string>
+    <string name="settings_about">Wain version %1$s</string>
     <string name="cat_unknown">Place</string>
     <string name="cat_hospital">Hospital</string>
     <string name="cat_mall">Shopping center</string>
