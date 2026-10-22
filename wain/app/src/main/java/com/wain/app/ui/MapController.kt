@@ -1,12 +1,15 @@
 package com.wain.app.ui
 
+import android.animation.ValueAnimator
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
+import android.view.animation.LinearInterpolator
 import com.wain.app.core.geo.BoundingBox
+import com.wain.app.core.geo.GeoMath
 import com.wain.app.core.geo.LatLon
 import com.wain.app.core.location.LocationFix
 import com.wain.app.data.poi.Poi
@@ -42,12 +45,6 @@ sealed interface CameraRequest {
     data class Fit(val points: List<LatLon>) : CameraRequest
 }
 
-/**
- * Wain Map Controller.
- *
- * Manages the map style, navigation overlays, user location,
- * route rendering, camera behaviour and map interactions.
- */
 class MapController(
     private val mapView: MapView,
     private val callbacks: Callbacks,
@@ -77,6 +74,11 @@ class MapController(
     private var selectedPoint: LatLon? = null
     private var fix: LocationFix? = null
     private var heading: Float? = null
+
+    // Position actually displayed on the map, smoothly interpolated between GPS fixes.
+    private var renderedPosition: LatLon? = null
+    private var positionAnimator: ValueAnimator? = null
+
     private var tilt3d = false
 
     init {
@@ -243,7 +245,6 @@ class MapController(
             }
         }
 
-        // Alternative route: muted blue-grey.
         s.addLayer(
             LineLayer(LYR_ROUTE_ALT, SRC_ROUTE_ALT).withProperties(
                 PropertyFactory.lineColor("#8795AB"),
@@ -254,7 +255,6 @@ class MapController(
             )
         )
 
-        // Dark casing makes the active route stand out against the map.
         s.addLayer(
             LineLayer(LYR_ROUTE_CASING, SRC_ROUTE).withProperties(
                 PropertyFactory.lineColor("#15366F"),
@@ -265,7 +265,6 @@ class MapController(
             )
         )
 
-        // Wain signature blue route.
         s.addLayer(
             LineLayer(LYR_ROUTE, SRC_ROUTE).withProperties(
                 PropertyFactory.lineColor("#3478F6"),
@@ -279,7 +278,6 @@ class MapController(
         s.addLayer(circleLayer(LYR_SAFETY, SRC_SAFETY, 7f))
         s.addLayer(circleLayer(LYR_REPORTS, SRC_REPORTS, 9f))
 
-        // Place markers scale smoothly as the map zoom changes.
         s.addLayer(
             CircleLayer(LYR_POI, SRC_POI).withProperties(
                 PropertyFactory.circleRadius(
@@ -298,7 +296,6 @@ class MapController(
             )
         )
 
-        // Labels are kept at street-level zoom to avoid clutter.
         val labels = SymbolLayer(LYR_POI_LABEL, SRC_POI).withProperties(
             PropertyFactory.textField(Expression.get("label")),
             PropertyFactory.textSize(12f),
@@ -313,7 +310,6 @@ class MapController(
         labels.setMinZoom(15f)
         s.addLayer(labels)
 
-        // Selected destination.
         s.addLayer(
             CircleLayer(LYR_SELECTED, SRC_SELECTED).withProperties(
                 PropertyFactory.circleRadius(10f),
@@ -323,7 +319,6 @@ class MapController(
             )
         )
 
-        // GPS accuracy area.
         s.addLayer(
             CircleLayer(LYR_ACCURACY, SRC_ACCURACY).withProperties(
                 PropertyFactory.circleColor("#3478F6"),
@@ -344,7 +339,6 @@ class MapController(
             )
         )
 
-        // Outer location halo.
         s.addLayer(
             CircleLayer(
                 LYR_POS_GLOW_OUTER,
@@ -357,7 +351,6 @@ class MapController(
             )
         )
 
-        // Inner location halo.
         s.addLayer(
             CircleLayer(
                 LYR_POS_GLOW_INNER,
@@ -370,7 +363,6 @@ class MapController(
             )
         )
 
-        // Compact position dot when no heading is available.
         val dot = CircleLayer(
             LYR_POS_DOT,
             SRC_POSITION,
@@ -390,7 +382,6 @@ class MapController(
 
         s.addLayer(dot)
 
-        // Direction arrow when heading is available.
         val arrow = SymbolLayer(
             LYR_POS_ARROW,
             SRC_POSITION,
@@ -463,10 +454,104 @@ class MapController(
         pushSelected()
     }
 
+    /**
+     * Updates the real GPS fix while smoothly animating the displayed marker
+     * between successive fixes. GPS data itself is not modified.
+     */
     fun setPosition(f: LocationFix?, bearing: Float?) {
+        val previousFix = fix
+        val sameMeasurement =
+            previousFix?.elapsedRealtimeMs == f?.elapsedRealtimeMs
+
         fix = f
         heading = bearing
-        pushPosition()
+
+        if (f == null) {
+            positionAnimator?.cancel()
+            positionAnimator = null
+            renderedPosition = null
+            pushPosition()
+            return
+        }
+
+        // A heading-only update should not restart the current animation.
+        if (sameMeasurement) {
+            pushPosition()
+            return
+        }
+
+        positionAnimator?.cancel()
+        positionAnimator = null
+
+        val target = f.position
+        val start = renderedPosition ?: previousFix?.position
+
+        // First fix or a large GPS correction: use the real location immediately.
+        if (
+            start == null ||
+            previousFix == null ||
+            GeoMath.distanceM(start, target) > MAX_ANIMATED_FIX_DISTANCE_M
+        ) {
+            renderedPosition = target
+            pushPosition()
+            return
+        }
+
+        val distanceM = GeoMath.distanceM(start, target)
+
+        if (distanceM < MIN_ANIMATED_FIX_DISTANCE_M) {
+            renderedPosition = target
+            pushPosition()
+            return
+        }
+
+        val intervalMs = (
+            f.elapsedRealtimeMs - previousFix.elapsedRealtimeMs
+        ).coerceIn(
+            MIN_POSITION_ANIMATION_MS,
+            MAX_POSITION_ANIMATION_MS
+        )
+
+        positionAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = intervalMs
+            interpolator = LinearInterpolator()
+
+            addUpdateListener { animator ->
+                val fraction = animator.animatedValue as Float
+
+                renderedPosition = interpolatePosition(
+                    start,
+                    target,
+                    fraction.toDouble()
+                )
+
+                pushPosition()
+            }
+
+            start()
+        }
+    }
+
+    private fun interpolatePosition(
+        from: LatLon,
+        to: LatLon,
+        fraction: Double
+    ): LatLon {
+        val rawLongitudeDelta = to.lon - from.lon
+
+        val longitudeDelta = when {
+            rawLongitudeDelta > 180.0 -> rawLongitudeDelta - 360.0
+            rawLongitudeDelta < -180.0 -> rawLongitudeDelta + 360.0
+            else -> rawLongitudeDelta
+        }
+
+        val longitude = from.lon + longitudeDelta * fraction
+        val wrappedLongitude = ((longitude + 540.0) % 360.0) - 180.0
+
+        return LatLon(
+            lat = from.lat + (to.lat - from.lat) * fraction,
+            lon = wrappedLongitude
+        )
     }
 
     private fun pushAll() {
@@ -590,8 +675,10 @@ class MapController(
             return
         }
 
+        val displayPosition = renderedPosition ?: currentFix.position
+
         val positionFeature =
-            Feature.fromGeometry(point(currentFix.position)).apply {
+            Feature.fromGeometry(point(displayPosition)).apply {
                 addNumberProperty(
                     "hb",
                     if (heading != null) 1 else 0,
@@ -610,7 +697,7 @@ class MapController(
 
         val metresPerPixelAtZoom22 =
             78271.52 *
-                cos(Math.toRadians(currentFix.position.lat)) /
+                cos(Math.toRadians(displayPosition.lat)) /
                 2.0.pow(22)
 
         val radiusAtZoom22 =
@@ -618,7 +705,7 @@ class MapController(
                 .coerceAtMost(1.0e7)
 
         val accuracyFeature =
-            Feature.fromGeometry(point(currentFix.position)).apply {
+            Feature.fromGeometry(point(displayPosition)).apply {
                 addNumberProperty("r22", radiusAtZoom22)
                 addNumberProperty(
                     "r0",
@@ -873,6 +960,11 @@ class MapController(
 
     companion object {
         private const val IMG_ARROW = "wain-arrow"
+
+        private const val MIN_ANIMATED_FIX_DISTANCE_M = 0.8
+        private const val MAX_ANIMATED_FIX_DISTANCE_M = 300.0
+        private const val MIN_POSITION_ANIMATION_MS = 450L
+        private const val MAX_POSITION_ANIMATION_MS = 1_200L
 
         private const val SRC_ROUTE_ALT = "src-route-alt"
         private const val SRC_ROUTE = "src-route"
